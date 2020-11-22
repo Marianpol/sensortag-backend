@@ -4,7 +4,7 @@
 
 #Configuration
 
-In the sensortag.py file set a `SENSORTAG_ADDRESS` variable to MAC address of your SensorTag.
+Write a MAC address of your SensorTag in the deviceAddress.txt file (put MAC address in a AA:AA:AA:AA:AA:AA format) or use web apllication to set up this address.
 
 #Run
 

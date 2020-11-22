@@ -1,12 +1,15 @@
 import os
 import sys
+import threading
 from datetime         import datetime
 from flask            import Flask, request, jsonify, make_response
 from flask_sockets    import Sockets
 from bluepy.btle      import BTLEException
 from bluepy.sensortag import SensorTag
+from db               import Database
 
 SENSORTAG_ADDRESS = ""
+app = Flask(__name__)
 
 class SensorTagDevice:
     def __init__(self, sensorTagAddress):
@@ -35,7 +38,7 @@ class SensorTagDevice:
         
         return readings
 
-    def getData(self):
+    def getData(self, db=False):
         readings = {}
         try:
             readings = self.getReadings()
@@ -46,8 +49,27 @@ class SensorTagDevice:
             except:
                 readings['exception'] = 'Could not connect to the SensorTag'
             
-        readings['time'] = str(datetime.now())[:-5]
+        readings['time'] = str(datetime.now())[:-7]
         
+        if db:
+            if len(readings) >= 6:
+                outsideTemp = [
+                    readings["irSensorAmbientTemp"],
+                    readings["humiditySensorAmbientTemp"],
+                    readings["barometerSensorAmbientTemp"]
+                ]
+                avgTemp = round(sum(outsideTemp) / len(outsideTemp),2)
+                avgTempStr = str(avgTemp)
+                readingsString = ('('
+                        + str(readings["pressure"]) + ','
+                        + str(readings["humidity"]) + ','
+                        + str(readings["irTargetTemp"]) + ','
+                        + avgTempStr + ",'"+ readings['time'] + "')")
+                
+                return readingsString
+            
+            return False
+                    
         return readings
     
     def reconnect(self):
@@ -55,15 +77,17 @@ class SensorTagDevice:
         self.tag.connect(self.tagAddress, 'random')
         
 def getDeviceAddressFromFile():
-    with open('deviceAddress.txt', 'r') as file:
-        return file.read()
+    try:
+        with open('deviceAddress.txt', 'r') as file:
+            return file.read()
+    except:
+        pass
 
-app = Flask(__name__)
 
 sensorTag = ''
 
 @app.before_request
-def createInstance():
+def initInstance():
     global SENSORTAG_ADDRESS
     global sensorTag
     if request.endpoint == 'live':
@@ -77,13 +101,7 @@ def createInstance():
             try:
                 sensorTag = SensorTagDevice(SENSORTAG_ADDRESS)           
             except:
-                pass
-    
-    #if not sensorTag:
-        #try:
-            #sensorTag = SensorTagDevice(SENSORTAG_ADDRESS)
-        #except:
-            #print('Could not connect to the SensorTag')    
+                pass  
 
 @app.route('/api/live', methods=["GET", "OPTIONS"])
 def live():
@@ -142,17 +160,55 @@ def setDeviceAddress():
     res.headers['Access-Control-Allow-Headers'] = '*'
     return res
 
-@app.route('/live')
-def socketSystem(ws):
-    while True:
-        message = ws.receive()
-        if message == "update":
-            readings = sensorTag.getData() 
-            res = make_response(jsonify(readings), 200)
-            res.headers['Access-Control-Allow-Origin'] = '*'
-            ws.send(res)
-        else:
-            ws.send(message)
+@app.route('/api/history', methods=["POST", "OPTIONS"])
+def getHistory():
+    content = {}
+    if request.method == 'POST':
+        content = request.get_json()
+        fromDate = content['from']
+        toDate = content['to']
+        query = "SELECT * FROM readings WHERE currentdate BETWEEN " + "'" + fromDate + "'" + " AND " + "'" + toDate + "';"
+        
+        SensorTagDB = Database('SensorTag_DB')
+        result = SensorTagDB.readTable(query)
+        print(result)
+        res = make_response(jsonify(result), 200)
+        res.headers['Access-Control-Allow-Origin'] = '*'
+        return res
+        
+          
+    res = make_response(jsonify({}), 200)
+    res.headers['Access-Control-Allow-Origin'] = '*'
+    res.headers['Access-Control-Allow-Headers'] = '*'
+    return res
+
+
+
+def createInstance():
+    global sensorTag
+    SENSORTAG_ADDRESS = getDeviceAddressFromFile()
+    
+    if SENSORTAG_ADDRESS:
+        sensorTag = SensorTagDevice(SENSORTAG_ADDRESS)
+    
+createInstance()
+
+def pushReadings():
+    if sensorTag:
+        threading.Timer(60, pushReadings).start()
+
+        readings = sensorTag.getData(True)
+        if readings:
+            SensorTagDB = Database('SensorTag_DB')
+            SensorTagDB.writeReading(readings)
+            result = SensorTagDB.readTable('select * from readings')
+            print(readings)
+    else:
+        createInstance()
+    
+pushReadings()
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0",port=int(os.getenv('PORT', 3001)))
