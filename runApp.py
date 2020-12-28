@@ -1,6 +1,7 @@
 import os
 import sys
 import threading
+import subprocess
 from datetime         import datetime
 from flask            import Flask, request, jsonify, make_response
 from flask_sockets    import Sockets
@@ -83,6 +84,8 @@ def getDeviceAddressFromFile():
     except:
         pass
 
+def runApp():
+    appOutput = subprocess.Popen(["npm", "start"], cwd="./website")
 
 sensorTag = ''
 
@@ -167,16 +170,19 @@ def getHistory():
         content = request.get_json()
         fromDate = content['from']
         toDate = content['to']
-        query = "SELECT * FROM readings WHERE currentdate BETWEEN " + "'" + fromDate + "'" + " AND " + "'" + toDate + "';"
+        query = """SELECT pressure,
+            humidity,
+            target_temp,
+            temperature,
+            currentdate FROM readings
+            WHERE DATE(currentdate) BETWEEN""" + " '" + fromDate + "'" + " AND " + "'" + toDate + "';"
         
         SensorTagDB = Database('SensorTag_DB')
         result = SensorTagDB.readTable(query)
-        print(result)
         res = make_response(jsonify(result), 200)
         res.headers['Access-Control-Allow-Origin'] = '*'
         return res
-        
-          
+               
     res = make_response(jsonify({}), 200)
     res.headers['Access-Control-Allow-Origin'] = '*'
     res.headers['Access-Control-Allow-Headers'] = '*'
@@ -207,8 +213,7 @@ def pushReadings():
         createInstance()
     
 pushReadings()
-
-
+runApp()
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0",port=int(os.getenv('PORT', 3001)))

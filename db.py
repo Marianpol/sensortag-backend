@@ -29,7 +29,7 @@ class Database:
         
         try:
             cursor.execute(query)
-            result = cursor.fetchone()
+            result = cursor.fetchall()
             return result
         except Error as e:
             print(e)
